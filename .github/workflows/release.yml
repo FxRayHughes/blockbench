@@ -23,6 +23,12 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Sync version from tag
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+
       - name: Publish Windows build
         run: npm run publish-windows
         env:
@@ -45,6 +51,12 @@ jobs:
 
       - name: Install rpm
         run: sudo apt-get update && sudo apt-get install -y rpm
+
+      - name: Sync version from tag
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
 
       - name: Publish Linux build
         run: npm run publish-linux
