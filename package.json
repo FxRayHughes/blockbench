@@ -32,7 +32,8 @@
 			{
 				"provider": "github",
 				"owner": "FxRayHughes",
-				"repo": "blockbench"
+				"repo": "blockbench",
+				"releaseType": "release"
 			}
 		],
 		"mac": {
