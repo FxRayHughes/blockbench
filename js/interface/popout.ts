@@ -10,7 +10,7 @@
 import { Blockbench } from "../api";
 import { ipcRenderer, currentwindow, process } from "../native_apis";
 import { panelPopoutDetachHistory } from "./panels";
-import { stopPopoutSync, requestFollowMainWindowMode } from "../io/popout_sync_hub";
+import { stopPopoutSync, requestFollowMainWindowMode, registerPanelStateSync } from "../io/popout_sync_hub";
 
 export type PopoutKind = 'panel' | 'preview';
 
@@ -43,6 +43,12 @@ const popout_owner_win_id: number | null = (() => {
 export function initPopoutMode(): void {
 	if (!isApp) return;
 	console.log('[popout] initPopoutMode: SoloMode=' + JSON.stringify(SoloMode) + ' argv=' + JSON.stringify(process.argv.filter(a => a.startsWith('--popout'))));
+
+	// [Popout] 此时 setupInterface()/setupPanels() 已跑完(boot_loader.js 调用
+	// 顺序:setupInterface() 在前,initPopoutMode() 在后),Panels 字典已填充,
+	// 可以安全扫描所有面板的 popout_config.syncState 并注册订阅。主窗口和
+	// 弹出窗口都要注册——双方都需要在本地状态变化时向对方广播。
+	registerPanelStateSync();
 
 	if (SoloMode) {
 		// [Popout] 弹出窗口里,任何挂载期异常都写到可见的覆盖层,避免"空白一闪而过"

@@ -1256,6 +1256,29 @@ Interface.definePanels(function() {
 			height: 400,
 			sidebar_index: 4,
 		},
+		popout: {
+			// [Popout] Keyframe 面板显示的是 Timeline.selected(全局单例)。
+			// 弹出后跟 Timeline 面板(可能在另一个窗口)各自选中的关键帧对不上，
+			// 弹出的 Keyframe 面板永远显示"未选中"或者选中了本窗口从未见过的
+			// 旧引用。按 uuid 广播选中集合，接收端遍历全部 animator 反查。
+			syncState: {
+				events: ['update_keyframe_selection'],
+				get() {
+					return {uuids: Timeline.selected.map(kf => kf.uuid)};
+				},
+				apply(panel, state) {
+					if (!state) return;
+					let all_keyframes = [];
+					Timeline.animators.forEach(animator => all_keyframes.push(...animator.keyframes));
+					let matched = state.uuids.map(uuid => all_keyframes.find(kf => kf.uuid == uuid)).filter(Boolean);
+					let current_uuids = Timeline.selected.map(kf => kf.uuid).sort().join(',');
+					if (current_uuids == state.uuids.slice().sort().join(',')) return;
+					Timeline.selected.replace(matched);
+					Timeline.keyframes.forEach(kf => kf.selected = matched.includes(kf));
+					updateKeyframeSelection();
+				},
+			},
+		},
 		toolbars: [
 			new Toolbar({
 				id: 'keyframe',

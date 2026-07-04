@@ -1070,6 +1070,10 @@ export class AnimationController extends AnimationItem {
 			updateInterface();
 			BarItems.slider_animation_controller_speed.update();
 		}
+		// [Popout] AnimationController.select()原本不 dispatch 任何事件,跟
+		// Animation.select()(dispatch 'select_animation')不对称。补上,给
+		// animation_controllers 面板的 popout.syncState 用来触发跨窗口广播。
+		Blockbench.dispatchEvent('select_animation_controller', {animation_controller: this});
 		return this;
 	}
 	clickSelect() {
@@ -1449,6 +1453,24 @@ Interface.definePanels(() => {
 		},
 		growable: true,
 		resizable: true,
+		popout: {
+			// [Popout] 同 Animations 面板:当前选中的 AnimationController 只是
+			// 本进程全局引用,弹出后跟其它窗口对不上。按 uuid 同步,接收端调用
+			// 目标 controller 的 .select()(继承自 AnimationItem)复用完整的
+			// 选中副作用。
+			syncState: {
+				events: ['select_animation_controller'],
+				get() {
+					return {uuid: AnimationController.selected ? AnimationController.selected.uuid : null};
+				},
+				apply(panel, state) {
+					if (!state || !state.uuid) return;
+					if (AnimationController.selected && AnimationController.selected.uuid == state.uuid) return;
+					let controller = AnimationController.all.find(c => c.uuid == state.uuid);
+					if (controller) controller.select();
+				},
+			},
+		},
 		onResize() {
 			if (this.inside_vue) this.inside_vue.updateConnectionWrapperOffset();
 		},

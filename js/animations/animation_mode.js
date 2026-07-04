@@ -1014,6 +1014,41 @@ Interface.definePanels(function() {
 			height: 400,
 			sidebar_index: 10,
 		},
+		popout: {
+			// [Popout] 变量占位符面板弹出后，文本/按钮值只是本进程的
+			// Project.variable_placeholders + Animator.MolangParser.variables，
+			// 直接影响动画预览效果(anim_time_update、blend_weight 等表达式都
+			// 依赖这些变量)。不同步的话弹窗和主窗口的动画表现会不一致。
+			syncState: {
+				events: ['edit_variable_placeholders'],
+				debounce: 100,
+				get(panel) {
+					return {
+						text: panel.inside_vue.text,
+						buttons: JSON.parse(JSON.stringify(panel.inside_vue.buttons)),
+					};
+				},
+				apply(panel, state) {
+					if (!state) return;
+					if (typeof state.text == 'string' && panel.inside_vue.text != state.text) {
+						panel.inside_vue.text = state.text;
+					}
+					if (Array.isArray(state.buttons)) {
+						panel.inside_vue.buttons.replace(state.buttons);
+						if (Project) Project.variable_placeholder_buttons.replace(state.buttons);
+						state.buttons.forEach(button => {
+							if (!button.variable) return;
+							if (button.type == 'toggle' || button.type == 'impulse') {
+								Animator.MolangParser.variables[button.variable] = button.value;
+							} else if (button.type == 'slider') {
+								Animator.MolangParser.variables[button.variable] = button.value;
+							}
+						});
+						Animator.preview();
+					}
+				},
+			},
+		},
 		component: {
 			name: 'panel-placeholders',
 			components: {VuePrismEditor},
@@ -1075,15 +1110,18 @@ Interface.definePanels(function() {
 						button.value = 1;
 						setTimeout(() => {
 							button.value = 0;
+							Blockbench.dispatchEvent('edit_variable_placeholders', {buttons: this.buttons});
 						}, Math.clamp(button.duration, 0, 1) * 1000);
 					}
 					if (button.variable) {
 						delete Animator.MolangParser.variables[button.variable];
 					}
 					Animator.preview();
+					Blockbench.dispatchEvent('edit_variable_placeholders', {buttons: this.buttons});
 				},
 				slideButton(button, e1) {
 					convertTouchEvent(e1);
+					let vue = this;
 					let last_event = e1;
 					let started = false;
 					let move_calls = 0;
@@ -1094,7 +1132,7 @@ Interface.definePanels(function() {
 						started = true;
 						if (!e1.touches && last_event == e1 && e1.target.requestPointerLock) e1.target.requestPointerLock();
 					}
-		
+
 					function move(e2) {
 						convertTouchEvent(e2);
 						if (!started && Math.abs(e2.clientX - e1.clientX) > 5) {
@@ -1116,7 +1154,7 @@ Interface.definePanels(function() {
 								difference *= canvasGridSize(e2.shiftKey || Pressing.overrides.shift, e2.ctrlOrCmd || Pressing.overrides.ctrl);
 							}
 
-							
+
 							button.value = Math.clamp(Math.roundTo((parseFloat(button.value) || 0) + difference, 4), button.min, button.max);
 
 							last_val = val;
@@ -1126,6 +1164,7 @@ Interface.definePanels(function() {
 
 							Animator.preview()
 							Blockbench.setStatusBarText(trimFloatNumber(total));
+							Blockbench.dispatchEvent('edit_variable_placeholders', {buttons: vue.buttons});
 						}
 					}
 					function off(e2) {
@@ -1164,6 +1203,11 @@ Interface.definePanels(function() {
 						this.updateButtons();
 						Project.variable_placeholder_buttons.replace(this.buttons);
 						Timeline.vue.updateGraph();
+						// [Popout] 变量占位符面板弹出后，这里的文本编辑只改了本进程
+						// 的 Project.variable_placeholders 和 MolangParser 变量,
+						// Timeline/Animator 留在其它窗口读不到,预览效果对不上。
+						// dispatch 事件给 popout.syncState 用来触发跨窗口广播。
+						Blockbench.dispatchEvent('edit_variable_placeholders', {text});
 					}
 				}
 			},

@@ -511,6 +511,28 @@ Interface.definePanels(() => {
 			height: 400,
 			sidebar_index: 4,
 		},
+		popout: {
+			// [Popout] 调色盘弹出到独立窗口后，main_color/second_color 只是那个
+			// 进程本地的 Vue 状态，主窗口画笔(Painter)读的是主窗口自己那份，
+			// 弹窗调色不会影响主窗口能画出来的颜色。这里让两边的颜色状态互相
+			// 广播，弹窗调色后主窗口立即能用，反之亦然。
+			syncState: {
+				events: ['change_color'],
+				get(panel) {
+					return {
+						main_color: panel.vue.main_color,
+						second_color: panel.vue.second_color,
+						second_color_selected: panel.vue.second_color_selected,
+					};
+				},
+				apply(panel, state) {
+					if (!state) return;
+					if (typeof state.main_color == 'string') panel.vue.main_color = state.main_color;
+					if (typeof state.second_color == 'string') panel.vue.second_color = state.second_color;
+					if (typeof state.second_color_selected == 'boolean') panel.vue.second_color_selected = state.second_color_selected;
+				},
+			},
+		},
 		toolbars: [
 			new Toolbar('color_picker', {
 				children: [

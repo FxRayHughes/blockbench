@@ -1692,6 +1692,25 @@ Interface.definePanels(function() {
 			height: 400,
 			sidebar_index: 0,
 		},
+		popout: {
+			// [Popout] Animations 面板弹出后，"当前选中动画"只是本进程的
+			// Animation.selected 全局引用；Timeline/Animator 等留在别处的面板
+			// 读的是它们各自进程本地那份，永远对不上。同步选中的动画 uuid，
+			// 接收端调用该动画实例的 .select()(而不是直接赋值 Animation.selected)，
+			// 复用它内部对 Timeline/骨骼动画器/MolangParser 的完整重置逻辑。
+			syncState: {
+				events: ['select_animation'],
+				get() {
+					return {uuid: Animation.selected ? Animation.selected.uuid : null};
+				},
+				apply(panel, state) {
+					if (!state || !state.uuid) return;
+					if (Animation.selected && Animation.selected.uuid == state.uuid) return;
+					let anim = Animation.all.find(a => a.uuid == state.uuid);
+					if (anim) anim.select();
+				},
+			},
+		},
 		toolbars: [
 			new Toolbar('animations', {
 				children: [

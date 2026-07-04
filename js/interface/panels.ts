@@ -58,6 +58,23 @@ interface PanelOptions {
 		onPopoutClose?(panel: Panel): void
 		/** 是否允许弹出，默认 true */
 		allowPopout?: boolean | (() => boolean)
+		/**
+		 * [Popout] 面板运行时状态跨窗口同步。用于覆盖那些不属于 ModelProject
+		 * 结构化数据、但影响面板实际可用性的同进程全局单例/局部 Vue 状态
+		 * (例如调色盘的 main_color、Timeline 的播放头/播放状态)。
+		 * 声明后由 popout_sync_hub.ts 统一接管订阅/防抖广播/应用，面板本身
+		 * 不需要关心跨窗口传输细节。
+		 */
+		syncState?: {
+			/** 触发重新广播的 Blockbench 事件名列表 */
+			events: string[]
+			/** 防抖时间(ms)，默认 150 */
+			debounce?: number
+			/** 取出当前要同步的状态，必须是可 JSON 序列化的值 */
+			get(panel: Panel): any
+			/** 把收到的远端状态应用到本地面板 */
+			apply(panel: Panel, state: any): void
+		}
 	}
 	toolbars?:
 		| {

@@ -245,6 +245,12 @@ export const Timeline = {
 			Timeline.updateSize()
 		}
 		Timeline.revealTime(seconds)
+		// [Popout] Timeline 弹出到独立窗口后，播放头位置(Timeline.time)只是
+		// 本进程的全局变量，跟其它窗口(主窗口/其它弹出面板)各自的渲染循环
+		// 完全独立。这里 dispatch 一个事件用于跨窗口同步，播放中每帧都会调
+		// setTime，但 syncState 自带防抖(见 panels.ts popout_config.syncState.debounce)，
+		// 不会真的每帧都发消息。
+		Blockbench.dispatchEvent('timeline_set_time', {seconds});
 	},
 	playAudioStutter() {
 		if (!settings.audio_scrubbing.value) return;
@@ -808,6 +814,38 @@ Interface.definePanels(() => {
 		},
 		growable: true,
 		resizable: true,
+		popout: {
+			// [Popout] Timeline 弹出后，播放头/播放状态是本进程全局
+			// (Timeline.time/playing/playback_speed)，跟其它窗口的渲染循环
+			// (js/preview/preview.js animate())各自独立推进，互不知晓——
+			// 结果是弹窗里播放/拖动进度条，其它窗口的模型完全不会动。
+			// 同步后每个窗口本地的 animate() 循环仍然各自 Timeline.loop()
+			// 推进(不是逐帧转发画面)，只需要 playing/time 起点对齐即可。
+			syncState: {
+				events: ['timeline_play', 'timeline_pause', 'timeline_set_time', 'select_animation'],
+				get() {
+					return {
+						playing: Timeline.playing,
+						time: Timeline.time,
+						playback_speed: Timeline.playback_speed,
+					};
+				},
+				apply(panel, state) {
+					if (!state || !Animation.selected) return;
+					if (typeof state.playback_speed == 'number') {
+						Timeline.playback_speed = state.playback_speed;
+					}
+					if (typeof state.time == 'number' && Math.abs(Timeline.time - state.time) > 0.02) {
+						Timeline.setTime(state.time);
+					}
+					if (state.playing && !Timeline.playing) {
+						Timeline.start();
+					} else if (!state.playing && Timeline.playing) {
+						Timeline.pause();
+					}
+				},
+			},
+		},
 		toolbars: [
 			new Toolbar('timeline', {
 				children: [

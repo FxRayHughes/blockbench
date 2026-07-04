@@ -23,6 +23,7 @@ import { Blockbench } from "../api";
 import { ipcRenderer, process } from "../native_apis";
 import { replaceProjectContentInPlace, applySelectionOnly } from "./popout_sync";
 import { computeTransformDiff, applyTransformDiff } from "./popout_sync_diff";
+import { Panels } from "../interface/panels";
 
 type SyncMessage =
 	| {type: 'project', seq: number, from: string, model: any}
@@ -30,7 +31,10 @@ type SyncMessage =
 	| {type: 'mode', seq: number, from: string, mode: string}
 	| {type: 'query_mode', seq: number, from: string}
 	| {type: 'mode_response', seq: number, from: string, mode: string}
-	| {type: 'diff', seq: number, from: string, projectUuid: string, elementChanges: [string, any][], groupChanges: [string, any][]};
+	| {type: 'diff', seq: number, from: string, projectUuid: string, elementChanges: [string, any][], groupChanges: [string, any][]}
+	// [Popout] 通用面板运行时状态同步(见 panels.ts PanelOptions.popout.syncState)。
+	// panelId 对应 Panels 字典的 key，state 是该面板 syncState.get() 的返回值。
+	| {type: 'panel_state', seq: number, from: string, panelId: string, state: any};
 
 interface Connection {
 	port: MessagePort
@@ -122,6 +126,44 @@ function broadcastSelection() {
 }
 const broadcastSelectionDebounced = debounce(broadcastSelection, 60);
 
+// [Popout] 通用面板运行时状态同步。任何 Panel 在自己的 popout 配置里声明
+// syncState({events, get, apply})即可接入，不需要改这个文件。
+// 由 registerPanelStateSync()(见下方)在 Panels 字典已填充完毕后统一订阅。
+function broadcastPanelState(panel_id: string) {
+	if (applying_remote || connections.size == 0) return;
+	let panel = (Panels as any)[panel_id];
+	let sync = panel?.popout_config?.syncState;
+	if (!panel || !sync) return;
+	outgoing_seq++;
+	broadcast({
+		type: 'panel_state',
+		seq: outgoing_seq,
+		from: window_instance_id,
+		panelId: panel_id,
+		state: sync.get(panel),
+	});
+}
+
+/**
+ * [Popout] 扫描 Panels 字典,给所有声明了 popout_config.syncState 的面板注册
+ * 事件监听。必须在 setupPanels() 跑完(Panels 字典已填充)之后调用——不能放在
+ * 本模块顶层的 `if (isApp)` 块里,那段代码在 boot_loader.js 里 import 时就
+ * 执行,早于 setupInterface()/setupPanels(),此时 Panels 还是空字典。
+ * 由 js/interface/popout.ts 的 initPopoutMode() 调用(它本身就在
+ * setupInterface() 之后才被 boot_loader.js 调用)。
+ */
+export function registerPanelStateSync() {
+	for (let panel_id in Panels) {
+		let panel = (Panels as any)[panel_id];
+		let sync = panel?.popout_config?.syncState;
+		if (!sync) continue;
+		let debounced = debounce(() => broadcastPanelState(panel_id), sync.debounce ?? 150);
+		for (let event_name of sync.events) {
+			Blockbench.addListener(event_name, debounced);
+		}
+	}
+}
+
 // [Popout] (#7.5) 模式(编辑/绘制/动画等)改为**独立**:子窗口切模式不影响主窗口,
 // 主窗口切模式也不影响子窗口。两个窗口是独立进程、各自维护 Mode.selected 全局,
 // 天然独立。仅在用户主动点"跟随主窗口"按钮时,子窗口发 query_mode 请求,主窗口
@@ -172,6 +214,14 @@ function handleIncoming(conn: Connection, msg: SyncMessage) {
 				groupChanges: new Map(msg.groupChanges),
 				structuralChange: false
 			});
+		} else if (msg.type == 'panel_state') {
+			// [Popout] 通用面板运行时状态同步的应用端。面板不存在(比如对方窗口
+			// 弹出了一个本窗口未挂载的面板 id)或未声明 syncState 时安全跳过。
+			let panel = (Panels as any)[msg.panelId];
+			let sync = panel?.popout_config?.syncState;
+			if (panel && sync) {
+				sync.apply(panel, msg.state);
+			}
 		}
 	} finally {
 		setTimeout(() => { applying_remote = false; }, 500);
@@ -197,11 +247,35 @@ if (isApp) {
 		// 弹出窗口此刻工程还是空的启动画面，反向广播会把主窗口的工程冲掉。
 		if (!is_popout_window) {
 			broadcastProject();
+			// [Popout] 同理,把主窗口当前的面板运行时状态(颜色/播放头等)也
+			// 作为初始内容推给新连接,否则弹出窗口要等下一次状态变化事件
+			// 才能追上(比如调色盘弹出瞬间还是默认白色,直到用户下次改色)。
+			for (let panel_id in Panels) {
+				let panel = (Panels as any)[panel_id];
+				let sync = panel?.popout_config?.syncState;
+				if (!sync) continue;
+				outgoing_seq++;
+				conn.port.postMessage({
+					type: 'panel_state',
+					seq: outgoing_seq,
+					from: window_instance_id,
+					panelId: panel_id,
+					state: sync.get(panel),
+				} as SyncMessage);
+			}
 		}
 	});
 
 	Blockbench.addListener('finish_edit', broadcastProjectDebounced);
 	Blockbench.addListener('update_selection', broadcastSelectionDebounced);
+	// [Popout] undo()/redo()(js/undo.js)只 dispatch 'undo'/'redo',不会触发
+	// 'finish_edit',原本的广播链路完全绑定在 finish_edit 上,导致撤销/重做的
+	// 工程数据变化不会广播给弹出窗口。这里补上监听,复用同一套防抖广播,不改
+	// undo.js 本身。
+	Blockbench.addListener('undo', broadcastProjectDebounced);
+	Blockbench.addListener('undo', broadcastSelectionDebounced);
+	Blockbench.addListener('redo', broadcastProjectDebounced);
+	Blockbench.addListener('redo', broadcastSelectionDebounced);
 	// [Popout] (#7.5) 不再监听 select_mode 自动广播 —— 模式改为独立,仅"跟随主窗口"
 	// 按钮主动触发 requestFollowMainWindowMode()。
 }
