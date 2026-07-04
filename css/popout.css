@@ -1,0 +1,118 @@
+/* [Popout] 面板/预览格弹出为独立窗口时的视觉裁剪与专属标题栏样式。
+
+   关键约束：本文件所有规则都必须限定在 body.solo-panel-mode 作用域下，
+   否则会泄漏到主窗口。#popout_title_bar 用的是 ID 选择器(specificity 高于
+   .hidden 的 display:none)，一旦不加作用域，主窗口里这个本该隐藏的标题栏
+   会以 position:absolute 盖住真正的菜单栏，导致"主窗口菜单全没了"。
+   主窗口标题栏(<header>)与子窗口标题栏(#popout_title_bar)刻意区分：
+   主窗口保留原生菜单栏；子窗口是无边框自绘标题栏，带 accent 强调色左边框、
+   居中面板名，跟主窗口一眼可辨。 */
+@layer base {
+	/* ---- 视觉裁剪：只在弹出窗口里隐藏主 UI、露出弹出内容 ---- */
+	body.solo-panel-mode {
+		background-image: none;
+	}
+	body.solo-panel-mode > header:not(#popout_title_bar),
+	body.solo-panel-mode #page_wrapper,
+	body.solo-panel-mode #dialog_wrapper,
+	body.solo-panel-mode #loading_error_message {
+		display: none !important;
+	}
+	body.solo-panel-mode #popout_content {
+		position: absolute;
+		top: var(--menu-bar-height);
+		left: 0;
+		right: 0;
+		bottom: 0;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+	}
+	body.solo-panel-mode #popout_content .panel_container {
+		flex-grow: 1;
+		height: 100%;
+		width: 100%;
+	}
+	body.solo-panel-mode #popout_content .panel_container .panel.grow {
+		height: calc(100% - 40px);
+	}
+
+	/* ---- 子窗口专属标题栏(仅 solo-panel-mode 下显示) ---- */
+	body.solo-panel-mode #popout_title_bar {
+		display: flex !important;
+		background-color: var(--color-frame);
+		border-top: 2px solid var(--color-accent);
+		box-sizing: border-box;
+		overflow: hidden;
+		white-space: nowrap;
+		height: var(--menu-bar-height);
+		width: 100%;
+		position: absolute;
+		top: 0;
+		left: 0;
+		z-index: 20;
+	}
+	body.solo-panel-mode #popout_title_bar_drag_region {
+		flex-grow: 1;
+		height: 100%;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0 10px;
+		overflow: hidden;
+		color: var(--color-text);
+		-webkit-app-region: drag;
+	}
+	body.solo-panel-mode #popout_title_bar_text {
+		font-size: 13px;
+		font-weight: 500;
+		letter-spacing: 0.3px;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	body.solo-panel-mode #popout_pin_button {
+		width: 34px;
+		height: 100%;
+		text-align: center;
+		flex-shrink: 0;
+		cursor: pointer;
+		padding-top: 3px;
+		-webkit-app-region: no-drag;
+	}
+	body.solo-panel-mode #popout_pin_button:hover {
+		color: var(--color-light);
+		background-color: var(--color-selected);
+	}
+	body.solo-panel-mode #popout_pin_button.active {
+		color: var(--color-accent);
+	}
+	body.solo-panel-mode #popout_window_controls {
+		flex-shrink: 0;
+		display: flex;
+		-webkit-app-region: no-drag;
+	}
+	body.solo-panel-mode #popout_window_controls li {
+		display: block;
+		width: 42px;
+		height: 100%;
+		text-align: center;
+	}
+	body.solo-panel-mode #popout_window_controls li:hover {
+		color: var(--color-light);
+		background-color: var(--color-selected);
+	}
+	body.solo-panel-mode #popout_window_controls li.wwm_r:hover {
+		color: var(--color-accent_text);
+		background-color: var(--color-close);
+	}
+	body.solo-panel-mode #popout_window_controls svg {
+		margin-top: 5px;
+	}
+	body.solo-panel-mode:not(.maximized) #popout_window_controls svg.restore {
+		display: none;
+	}
+	body.solo-panel-mode.maximized #popout_window_controls svg.maximize {
+		display: none;
+	}
+}

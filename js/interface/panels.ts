@@ -44,6 +44,21 @@ interface PanelOptions {
 	 * Adds a button to the panel that allows users to pop-out and expand the panel on click
 	 */
 	expand_button?: boolean
+	/**
+	 * [Popout] 弹出为独立窗口(Electron BrowserWindow)时的特化适配钩子。
+	 * 不提供则走通用默认行为(applyPanelPopout)。所有面板默认允许弹出，
+	 * 个别面板可用 allowPopout 显式禁止。
+	 */
+	popout?: {
+		/** 弹出窗口就绪、面板容器已挂载到新窗口 document 后调用 */
+		onPopoutReady?(panel: Panel, info: {width: number, height: number}): void
+		/** 弹出窗口 resize 时调用，用于补充默认CSS自适应之外的命令式逻辑 */
+		onPopoutResize?(panel: Panel, width: number, height: number): void
+		/** 面板收回主窗口前，在弹出窗口关闭前调用，用于清理弹出期间的专属状态 */
+		onPopoutClose?(panel: Panel): void
+		/** 是否允许弹出，默认 true */
+		allowPopout?: boolean | (() => boolean)
+	}
 	toolbars?:
 		| {
 				[id: string]: Toolbar
@@ -95,6 +110,11 @@ export class Panel extends EventSystem {
 	plugin?: string
 	onResize: () => void
 	onFold: () => void
+	/** [Popout] 弹出为独立窗口时的特化适配钩子，见 PanelOptions.popout */
+	popout_config?: PanelOptions['popout']
+	/** [Popout] 本面板当前是否已挂到弹出窗口的 #popout_content。为 true 时,
+	 *  update()/updateSidebarOrder() 跳过它,不再把它重新塞回(隐藏的)侧栏槽位。 */
+	popout_active?: boolean
 
 	previous_slot: PanelSlot
 	width: number
@@ -144,6 +164,7 @@ export class Panel extends EventSystem {
 
 		this.onResize = data.onResize;
 		this.onFold = data.onFold;
+		this.popout_config = data.popout;
 		this.events = {};
 		this.toolbars = [];
 
@@ -885,6 +906,11 @@ export class Panel extends EventSystem {
 		return this;
 	}
 	updateSlot(): this {
+		// [Popout] 已弹出到独立窗口的面板固定挂在 #popout_content,不参与槽位布局。
+		// Mode.select() 会对所有面板调 updateSlot(),把不属于当前模式的面板移到
+		// 'hidden' 槽位 => container.remove(),正是把弹出面板从弹出窗口里拽走、
+		// 导致"闪一下就空白"的元凶。这里直接短路。
+		if (this.popout_active) return this;
 		let slot = this.slot;
 
 		this.container.classList.remove('floating');
@@ -933,6 +959,9 @@ export class Panel extends EventSystem {
 		return this;
 	}
 	update(dragging: boolean = false) {
+		// [Popout] 已弹出到独立窗口的面板固定挂在 #popout_content,不参与主界面
+		// 的显隐/槽位布局,否则 updateInterface() 会把它从弹出窗口里拽回隐藏侧栏。
+		if (this.popout_active) return;
 		let show = BARS.condition(this.condition);
 		if (!Blockbench.isMobile) {
 			// Hide panel if its in host panel
@@ -1078,9 +1107,43 @@ export class Panel extends EventSystem {
 		this.container.remove();
 		updateInterfacePanels();
 	}
+	/**
+	 * [Popout] 是否允许该面板弹出为独立窗口，默认 true
+	 */
+	canPopout(): boolean {
+		if (!isApp) return false;
+		let allow = this.popout_config?.allowPopout;
+		if (typeof allow == 'function') return allow();
+		return allow !== false;
+	}
+	/**
+	 * [Popout] 请求把该面板弹出为独立的 Electron 窗口。
+	 * 若面板处于附着(attached_to)状态，先自我摘出；若有其它面板附着在它上面，
+	 * 也一并摘出并记录摘出前的宿主，供收回时复原标签组。
+	 */
+	requestPanelPopout(): void {
+		if (!this.canPopout()) return;
+		let attached_panels = this.getAttachedPanels();
+		if (this.attached_to) {
+			panelPopoutDetachHistory.set(this.id, this.attached_to);
+			this.moveTo('float');
+		}
+		for (let attached of attached_panels) {
+			panelPopoutDetachHistory.set(attached.id, this.id);
+			attached.moveTo('float');
+		}
+		let default_size: [number, number] = this.position_data.float_size ?? [400, 400];
+		requestPopout('panel', this.id, default_size);
+		this.moveTo('hidden');
+	}
 	static selected: Panel | undefined
 	static floating_panel_z_order: string[] = []
 }
+/**
+ * [Popout] panelId -> hostPanelId，记录面板弹出前的附着关系，供收回时用
+ * hostPanel.attachPanel(panel) 复原标签组
+ */
+export const panelPopoutDetachHistory = new Map<string, string>();
 export interface Panel {
 	snap_menu: Menu
 }
@@ -1145,6 +1208,15 @@ Panel.prototype.snap_menu = new Menu([
 				click: (panel) => {
 					panel.fixed_height = false;
 					panel.moveTo('hidden');
+				}
+			},
+			'_',
+			{
+				name: 'menu.panel.move_to.window',
+				icon: 'open_in_new',
+				condition: (panel: Panel) => panel.canPopout(),
+				click: (panel) => {
+					panel.requestPanelPopout();
 				}
 			}
 		])
@@ -1308,7 +1380,7 @@ export function updateSidebarOrder() {
 	['left_bar', 'right_bar'].forEach(bar => {
 		let bar_node = document.querySelector(`.sidebar#${bar}`);
 		let current_panels = Array.from(bar_node.childNodes).map(panel_node => (panel_node as HTMLElement).getAttribute('panel_id')).filter(panel_id => {
-			return Panels[panel_id] && Condition(Panels[panel_id].condition) && !Panels[panel_id].attached_to;
+			return Panels[panel_id] && Condition(Panels[panel_id].condition) && !Panels[panel_id].attached_to && !Panels[panel_id].popout_active;
 		});
 
 		let target_order = Interface.calculateSidebarOrder(bar) as string[];
@@ -1316,6 +1388,9 @@ export function updateSidebarOrder() {
 		let panel_count = 0;
 		target_order.forEach((panel_id: string) => {
 			let panel: Panel = Panels[panel_id];
+			// [Popout] 已弹出的面板固定在弹出窗口,不在主界面侧栏里排布,也不要 remove()
+			// (remove 会把它从弹出窗口的 #popout_content 里摘掉)。
+			if (panel.popout_active) return;
 			panel.container.classList.remove('bottommost_panel');
 			panel.container.classList.remove('topmost_panel');
 			if (!panel.attached_to && Condition(panel.condition)) {

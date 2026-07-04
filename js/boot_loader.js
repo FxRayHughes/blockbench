@@ -8,6 +8,7 @@ import { ipcRenderer, SystemInfo } from "./native_apis";
 import { initializeDesktopApp, loadOpenWithBlockbenchFile } from "./desktop";
 import { AutoBackup } from "./auto_backup";
 import { initReferenceImages } from "./preview/reference_images";
+import { initPopoutMode } from "./interface/popout";
 
 Interface.page_wrapper = document.getElementById('page_wrapper');
 Interface.work_screen = document.getElementById('work_screen');
@@ -180,5 +181,9 @@ if (Blockbench.isMobile) {
 }
 
 document.getElementById('page_wrapper').classList.remove('invisible');
+
+// [Popout] 在完整启动流程跑完后做一次性的SoloMode检测与视觉裁剪，
+// 或(非popout窗口下)注册收回监听
+initPopoutMode();
 
 Blockbench.setup_successful = true;

@@ -643,6 +643,12 @@ document.getElementById('window_controls_button_close').addEventListener('click'
 
 //Close
 window.onbeforeunload = function (event) {
+	// [Popout] 弹出子窗口只是主窗口工程的镜像视图,自身没有"未保存工程"的概念
+	// (保存归主窗口管)。直接放行关闭,否则会命中下面的未保存检查 -> 弹出被
+	// solo-panel-mode 隐藏的对话框 + shell.beep(),表现为"关不掉只响铃"。
+	if (typeof SoloMode != 'undefined' && SoloMode) {
+		return undefined;
+	}
 	try {
 		updateRecentProjectData()
 	} catch(err) {}

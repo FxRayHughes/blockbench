@@ -2674,6 +2674,16 @@ BARS.defineActions(function() {
 
 Interface.definePanels(function() {
 
+	// [Popout] 把 UV 面板尺寸对齐到弹出窗口可用区域(总高减去自绘标题栏)，
+	// 再触发 updateSize() 重算 viewport，供下面 popout.onPopoutReady/onPopoutResize 复用。
+	function fitUVToPopout(panel, width, height) {
+		let title_bar = document.getElementById('popout_title_bar');
+		let title_bar_height = title_bar && !title_bar.classList.contains('hidden') ? title_bar.clientHeight : 0;
+		panel.width = width;
+		panel.height = height - title_bar_height;
+		Vue.nextTick(() => UVEditor.vue.updateSize());
+	}
+
 	UVEditor.panel = new Panel('uv', {
 		icon: 'photo_size_select_large',
 		expand_button: true,
@@ -2710,6 +2720,19 @@ Interface.definePanels(function() {
 			Vue.nextTick(() => {
 				UVEditor.vue.updateSize();
 			})
+		},
+		popout: {
+			// [Popout] UV 编辑器弹出后，面板的 width/height 不再由主窗口的
+			// dock/float 布局驱动(那套逻辑在弹出窗口里不跑)，updateSize() 又是
+			// 直接读 UVEditor.panel.width/height 来定 viewport 尺寸的。这里把
+			// 面板尺寸对齐到弹出窗口的可用区域(减掉自绘标题栏高度)，再触发一次
+			// updateSize()，否则 viewport 停在默认 320，窗口底部一大片空白。
+			onPopoutReady(panel, info) {
+				fitUVToPopout(panel, info.width, info.height);
+			},
+			onPopoutResize(panel, width, height) {
+				fitUVToPopout(panel, width, height);
+			},
 		},
 		onFold: function() {
 			Vue.nextTick(() => {

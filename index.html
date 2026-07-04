@@ -21,12 +21,20 @@
 	<link rel="stylesheet" href="css/start_screen.css">
 	<link rel="stylesheet" href="css/panels.css">
 	<link rel="stylesheet" href="css/dialogs.css">
+	<link rel="stylesheet" href="css/popout.css">
 	<style type="text/css" id="theme_css"></style>
 	<style type="text/css" id="theme_thumbnail_css"></style>
 </head>
 <body spellcheck="false" class="maximized">
 	<script>
 		if (typeof module === 'object') {window.module = module; module = undefined;}//jQuery Fix
+
+		// [Popout] 在 bundle(native_apis 会 delete window.process)执行前,趁 process
+		// 还在,记住本窗口是否是弹出窗口,供后面的加载错误处理判断是否要开 devtools。
+		try {
+			window.__is_popout_window = !!(window.process && window.process.argv
+				&& window.process.argv.some(a => a.startsWith('--popout-kind=')));
+		} catch (e) { window.__is_popout_window = false; }
 		
 		if (localStorage.getItem('theme')) {
 			try {
@@ -101,6 +109,30 @@
 			<i class="material-icons icon">system_update</i>
 		</a></button>
 	</header>
+
+	<!-- [Popout] 面板/预览格弹出窗口专用的无边框标题栏，仅在 solo-panel-mode 下显示，
+	     由 js/interface/popout.ts 负责绑定拖拽区/置顶/最小化/最大化/关闭的行为 -->
+	<header id="popout_title_bar" class="hidden">
+		<div id="popout_title_bar_drag_region" class="app-drag-region">
+			<span id="popout_title_bar_text"></span>
+		</div>
+		<div id="popout_mode_switcher" class="tool" title="Switch Mode">
+			<i class="material-icons icon">widgets</i>
+		</div>
+		<div id="popout_pin_button" class="tool" title="Always on Top">
+			<i class="material-icons icon">push_pin</i>
+		</div>
+		<ul id="popout_window_controls">
+			<li id="popout_controls_button_minimize">
+				<svg width="18" height="18" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor"><path d="M14 8v1H3V8h11z"/></svg>
+			</li>
+			<!-- [Popout] 最大化按钮隐藏:子窗口作为浮动工具窗,最大化无意义且有显示 bug(#7.4),直接移除。 -->
+			<li class="wwm_r" id="popout_controls_button_close">
+				<svg width="18" height="18" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M7.116 8l-4.558 4.558.884.884L8 8.884l4.558 4.558.884-.884L8.884 8l4.558-4.558-.884-.884L8 7.116 3.442 2.558l-.884.884L7.116 8z"/></svg>
+			</li>
+		</ul>
+	</header>
+	<div id="popout_content"></div>
 	
 
 	<div id="page_wrapper" class="invisible start_screen">
@@ -207,7 +239,11 @@
 		}
 		if (!window.Blockbench?.setup_successful || !browser_check_passed) {
 			document.getElementById('loading_error_message').style.display = 'block'
-			if (window.require) {
+			// [Popout] 弹出窗口不自动开 devtools(会干扰,而且一闪而过时也看不到)。
+			// __is_popout_window 由页首内联脚本在 window.process 被删前记录。
+			if (window.__is_popout_window) {
+				// 弹出窗口:什么都不做,交给主进程把 renderer 日志转发到终端。
+			} else if (window.require) {
 				require('@electron/remote').getCurrentWindow().webContents.openDevTools();
 			} else if (window.openDevTools) {
 				window.openDevTools();

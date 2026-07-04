@@ -1673,6 +1673,9 @@ export class Preview {
 		'split_screen',
 		{icon: 'fullscreen', name: 'menu.preview.maximize', condition: function(preview) {return Preview.split_screen.enabled && !ReferenceImageMode.active && !Modes.display}, click: function(preview) {
 			preview.fullscreen();
+		}},
+		{icon: 'open_in_new', name: 'menu.preview.popout', condition: function(preview) {return isApp && !SoloMode && !ReferenceImageMode.active && !Modes.display}, click: function(preview) {
+			requestPreviewPopout(preview);
 		}}
 	])
 
@@ -1765,6 +1768,99 @@ Preview.split_screen = {
 		Interface.preview.style.setProperty('--split-y', Math.roundTo(Interface.data.quad_view_y, 2) + '%');
 	}
 }
+
+// [Popout] 预览分屏格弹出为独立窗口。跟面板弹出走同一套主进程IPC契约
+// (kind: 'preview', targetId: 分屏下标)，但因为 Preview 不是 Panel 子类，
+// 挂载/收回/独立渲染循环单独实现，不复用 applyPanelPopout。
+let popout_preview_animation_frame = null;
+
+/**
+ * [Popout] 请求把某个分屏格弹出为独立窗口。preview 必须是当前 split_screen
+ * 里的一个格子 (index 0 即 main_preview)。
+ */
+// [Popout] 弹出预览子窗口用的下标计数器。子窗口里的预览格是全新独立实例
+// (kind:'preview' 的 targetId),用 >=100 的高位下标避开主窗口分屏用的 0..3,
+// 避免和分屏格串号(主进程 popout-request 按 kind:targetId 去重)。
+let next_popout_preview_index = 100;
+
+// [Popout] 分屏"降一级":点某格弹出后主窗口剩余格子的目标布局。
+// 有意收窄——只保证单/双两种常见场景干净;三/四格降级沿用固定 grid-area
+// 布局(中间格弹出可能留空位),属已知限制。
+function reduceSplitScreenMode(mode) {
+	if (mode == 'quad') return 'triple_left';
+	if (mode.startsWith('triple')) return 'double_horizontal';
+	if (mode.startsWith('double')) return 'single';
+	return 'single';
+}
+
+/**
+ * [Popout] 请求把"预览"弹出为独立子窗口。两种场景:
+ * - 单视图:主窗口保持不变,额外在外面弹出一个全新视图子窗口。
+ * - 分屏:被点的那一格从主窗口移除(分屏降一级,如左右双格点右侧->主窗口变单视图),
+ *   同时弹出一个全新视图子窗口。
+ * 子窗口里的预览是全新实例(默认相机角度),通过 MessagePort 同步模型内容;
+ * 不沿用被点格的相机状态(实现取舍,见 [[popout-feature]])。
+ */
+function requestPreviewPopout(preview) {
+	// 分屏场景:先把主窗口的分屏降一级(change() 会同步下拉框显示并触发 setMode)。
+	if (Preview.split_screen.enabled) {
+		// 被弹出的那一格不再需要留在主窗口;把选中态复位到主预览,避免 setMode
+		// 里 Preview.selected.fullscreen() 引用到即将移除的格子。
+		if (Preview.selected === preview && preview !== main_preview) {
+			Preview.selected = main_preview;
+		}
+		let target_mode = reduceSplitScreenMode(Preview.split_screen.mode);
+		BarItems.split_screen.change(target_mode);
+	}
+
+	// 无论单视图还是分屏,子窗口都用一个全新高位下标的独立预览格。
+	let popout_index = next_popout_preview_index++;
+	requestPopout('preview', String(popout_index), [480, 480]);
+}
+
+/**
+ * [Popout] 弹出窗口渲染进程侧调用：把目标分屏格的 canvas 挂到
+ * #popout_content，并为它单独起一个最小化渲染循环 (只做 preview.render()，
+ * 不复用主窗口 animate() 里 Timeline/特效更新等无关逻辑)。
+ * 主窗口 animate() 循环里 `canvas.isConnected` 的判断天然会跳过这一格，
+ * 不需要额外补丁。
+ */
+Blockbench.on('popout_mount_preview', ({index}) => {
+	let preview = Preview.split_screen.lazyLoadPreview(index);
+	let content = document.getElementById('popout_content');
+	content.append(preview.node);
+	preview.node.classList.remove('hidden', 'fixed_ratio');
+
+	document.getElementById('popout_title_bar_text').textContent = tl('menu.preview.popout_title') || 'Preview';
+
+	function renderLoop() {
+		popout_preview_animation_frame = requestAnimationFrame(renderLoop);
+		if (preview.canvas.isConnected) preview.render();
+	}
+	renderLoop();
+
+	window.addEventListener('resize', () => preview.resize());
+	preview.resize();
+})
+
+/**
+ * [Popout] 主窗口侧调用：弹出窗口关闭后，把对应分屏格的 canvas 收回原来的
+ * split_screen_wrapper 网格位置 (若分屏模式仍然启用)，否则丢弃引用等待下次
+ * lazyLoadPreview 重新创建包装容器。
+ */
+Blockbench.on('popout_recover_preview', ({index}) => {
+	let preview = Preview.split_screen.previews[index];
+	if (!preview) return;
+	if (Preview.split_screen.enabled) {
+		let wrapper = Interface.createElement('div', {class: `split_screen_wrapper split_screen_wrapper_${index}`}, preview.node);
+		wrapper.style.gridArea = `preview_${index}`;
+		Interface.preview.append(wrapper);
+		preview.node.classList.remove('hidden');
+		preview.resize();
+	} else {
+		preview.node.classList.add('hidden');
+	}
+})
 
 Blockbench.on('update_camera_position', e => {
 	let scale = Preview.selected.calculateControlScale(Transformer.position) || 0.8;
@@ -2441,6 +2537,17 @@ BARS.defineActions(function() {
 		},
 		onChange() {
 			Preview.split_screen.setMode(this.value);
+		}
+	})
+	// [Popout] 顶部"视图"菜单里的"弹出窗口"入口：把当前选中的预览格弹出为独立窗口。
+	// 与预览格右键菜单里的同名项(见 Preview.prototype.menu)共用 requestPreviewPopout。
+	new Action('popout_preview', {
+		icon: 'open_in_new',
+		category: 'view',
+		condition: () => isApp && !Modes.display && !Format.image_editor && !ReferenceImageMode.active,
+		click() {
+			let preview = Preview.selected || main_preview;
+			if (preview) requestPreviewPopout(preview);
 		}
 	})
 	new Action('focus_on_selection', {
