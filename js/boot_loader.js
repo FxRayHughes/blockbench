@@ -9,6 +9,7 @@ import { initializeDesktopApp, loadOpenWithBlockbenchFile } from "./desktop";
 import { AutoBackup } from "./auto_backup";
 import { initReferenceImages } from "./preview/reference_images";
 import { initPopoutMode } from "./interface/popout";
+import { registerPanelStateSync } from "./io/popout_sync_hub";
 
 Interface.page_wrapper = document.getElementById('page_wrapper');
 Interface.work_screen = document.getElementById('work_screen');
@@ -168,7 +169,14 @@ localStorage.setItem('last_version', Blockbench.version);
 		}
 		proceeded = true;
 	}
-	loadInstalledPlugins().then(proceed);
+	// [Popout] loadInstalledPlugins() 内部把返回的 Promise 存到了
+	// Plugins.install_promise，供 popout.ts 在弹出窗口里"目标面板由插件注册但
+	// 尚未就位"时复用等待(不能重新调用 loadInstalledPlugins()，它不是幂等的，
+	// 会重复执行一遍插件安装/加载副作用)。这里额外等它 resolve 后补扫一次
+	// registerPanelStateSync()，把迟到的插件面板的跨窗口同步订阅补上。
+	let install_promise = loadInstalledPlugins();
+	install_promise.then(() => registerPanelStateSync());
+	install_promise.then(proceed);
 	setTimeout(proceed, 1200);
 })()
 

@@ -11,6 +11,7 @@ import { Blockbench } from "../api";
 import { ipcRenderer, currentwindow, process } from "../native_apis";
 import { panelPopoutDetachHistory } from "./panels";
 import { stopPopoutSync, requestFollowMainWindowMode, registerPanelStateSync } from "../io/popout_sync_hub";
+import { Plugins } from "../plugin_loader";
 
 export type PopoutKind = 'panel' | 'preview';
 
@@ -106,9 +107,34 @@ function applySoloWindowMode() {
 function applyPanelPopoutContent(panel_id: string) {
 	let panel = Panels[panel_id];
 	if (!panel) {
-		showPopoutError(`找不到面板 "${panel_id}"。已注册面板: ${Object.keys(Panels).join(', ')}`);
+		// [Popout] 插件注册的面板可能尚未就位：loadInstalledPlugins() 在
+		// boot_loader.js 里是异步的，initPopoutMode() 紧跟着同步执行，不等它
+		// 完成。主窗口不受影响(不强依赖插件加载完成才能用)，但弹出窗口是完整
+		// 重跑一遍 boot_loader.js 的新进程，如果目标面板由插件注册，此刻可能
+		// 还没跑到。复用 boot_loader.js 存到 Plugins.install_promise 的共享
+		// Promise 等它完成后重试一次(不能重新调用 loadInstalledPlugins()——
+		// 它不是幂等的，会重复执行一遍插件安装/加载副作用)，仍找不到才是真的
+		// 配置错误/插件缺失。
+		let wait = Plugins.install_promise;
+		if (wait) {
+			wait.then(() => {
+				let retried = Panels[panel_id];
+				if (retried) {
+					registerPanelStateSync();
+					mountPanelPopoutContent(retried, panel_id);
+				} else {
+					showPopoutError(`找不到面板 "${panel_id}"。已注册面板: ${Object.keys(Panels).join(', ')}`);
+				}
+			});
+		} else {
+			showPopoutError(`找不到面板 "${panel_id}"。已注册面板: ${Object.keys(Panels).join(', ')}`);
+		}
 		return;
 	}
+	mountPanelPopoutContent(panel, panel_id);
+}
+
+function mountPanelPopoutContent(panel: any, panel_id: string) {
 	console.log('[popout] mounting panel "' + panel_id + '" -> #popout_content');
 	let content = document.getElementById('popout_content');
 	content.append(panel.container);

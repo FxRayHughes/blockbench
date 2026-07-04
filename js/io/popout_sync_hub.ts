@@ -151,12 +151,19 @@ function broadcastPanelState(panel_id: string) {
  * 执行,早于 setupInterface()/setupPanels(),此时 Panels 还是空字典。
  * 由 js/interface/popout.ts 的 initPopoutMode() 调用(它本身就在
  * setupInterface() 之后才被 boot_loader.js 调用)。
+ *
+ * 可安全重复调用:已注册过的 panel_id 会跳过,不会重复挂监听。插件注册的面板
+ * 因为 loadInstalledPlugins() 是异步的，可能在首次调用时还不存在于 Panels
+ * 字典里——插件加载完成后应再调一次本函数，把迟到的面板补上。
  */
+const panel_state_sync_registered = new Set<string>();
 export function registerPanelStateSync() {
 	for (let panel_id in Panels) {
+		if (panel_state_sync_registered.has(panel_id)) continue;
 		let panel = (Panels as any)[panel_id];
 		let sync = panel?.popout_config?.syncState;
 		if (!sync) continue;
+		panel_state_sync_registered.add(panel_id);
 		let debounced = debounce(() => broadcastPanelState(panel_id), sync.debounce ?? 150);
 		for (let event_name of sync.events) {
 			Blockbench.addListener(event_name, debounced);

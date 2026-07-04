@@ -34,6 +34,13 @@ export const Plugins = {
 	currently_loading: '',
 	loading_promise: null as null | Promise<void>,
 	/**
+	 * [Popout] loadInstalledPlugins() 不是幂等的——每次调用都会重新跑一遍插件
+	 * 安装/加载流程。boot_loader.js 里只会调用一次，并把返回的 Promise 存在
+	 * 这里；任何需要"等插件加载完成"的地方(如弹出窗口里插件面板尚未就位时的
+	 * 重试逻辑)应该 await 这个字段，而不是再调用一次 loadInstalledPlugins()。
+	 */
+	install_promise: null as null | Promise<any>,
+	/**
 	 * The currently used path to the plugin API
 	 */
 	api_path: settings.cdn_mirror.value ? 'https://blckbn.ch/cdn/plugins' : 'https://cdn.jsdelivr.net/gh/JannisX11/blockbench-plugins/plugins',
@@ -1053,6 +1060,11 @@ $.getJSON('https://blckbn.ch/api/stats/plugins?weeks=2', data => {
 })
 
 export async function loadInstalledPlugins() {
+	let promise = loadInstalledPluginsInner();
+	Plugins.install_promise = promise;
+	return await promise;
+}
+async function loadInstalledPluginsInner() {
 	if (Plugins.loading_promise) {
 		await Plugins.loading_promise;
 	}
