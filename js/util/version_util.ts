@@ -1,9 +1,10 @@
-const VERSION_REGEX = /^(?<version>[\d.]+)(?:-beta\.(?<beta>[\d\.]+))?$/
+const VERSION_REGEX = /^(?<version>[\d.]+)(?:-beta\.(?<beta>[\d\.]+))?(?:-r(?<revision>\d+))?$/
 
 interface ParsedVersion {
 	string: string
 	version: number[]
 	beta?: number[]
+	revision?: number
 }
 
 type Operator = '<=' | '==' | '>=' | '>' | '<'
@@ -15,15 +16,17 @@ function parse(versionString: string): ParsedVersion {
 		throw new Error(
 			`Invalid version format '${versionString}'.` +
 				"Expected a list of dot-separated numbers, optionally followed by '-beta.' " +
-				"and another list of dot-separated numbers. E.g. '1.2.3' or '1.2.3-beta.4'"
+				"and another list of dot-separated numbers, and/or a '-r' revision suffix. " +
+				"E.g. '1.2.3', '1.2.3-beta.4' or '1.2.3-r1'"
 		)
 	}
 
-	const { version, beta } = match.groups
+	const { version, beta, revision } = match.groups
 	return {
 		string: versionString,
 		version: version.split('.').map(v => parseInt(v)),
 		beta: beta ? beta.split('.').map(v => parseInt(v)) : undefined,
+		revision: revision ? parseInt(revision) : undefined,
 	}
 }
 
