@@ -697,6 +697,7 @@ ModelProject.prototype.menu = new Menu([
 	new MenuSeparator('manage'),
 	'open_model_folder',
 	'duplicate_project',
+	'detach_project',
 	'convert_project',
 	'close_project',
 	new MenuSeparator('save'),
@@ -1237,6 +1238,20 @@ BARS.defineActions(function() {
 			Project.name = copyfyName(Project.name);
 
 			Texture.all.find(t => t.uuid == selected_texture_uuid)?.select();
+		}
+	})
+	new Action('detach_project', {
+		icon: 'open_in_new',
+		category: 'file',
+		condition: () => isApp && Project && !Project.EditSession,
+		click: function () {
+			// Detach the whole tab into its own window, reusing the drag-out-tab machinery:
+			// the new window loads the compiled project and signals back to close this source tab.
+			let project_data = Codecs.project.compile({editor_state: true, history: true, uuids: true, bitmaps: true, raw: true});
+			project_data.detached_uuid = Project.uuid;
+			project_data.detached_window_id = currentwindow.id;
+			ipcRenderer.send('new-window', JSON.stringify(project_data));
+			Project.detached = true;
 		}
 	})
 	new Action('convert_project', {

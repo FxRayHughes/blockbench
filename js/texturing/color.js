@@ -799,6 +799,8 @@ Interface.definePanels(() => {
 					'sort_palette',
 					'save_palette',
 					'load_palette',
+					'copy_palette',
+					'paste_palette',
 				]
 			})
 		],
@@ -904,6 +906,9 @@ Interface.definePanels(() => {
 			'sort_palette',
 			'save_palette',
 			'load_palette',
+			new MenuSeparator('clipboard'),
+			'copy_palette',
+			'paste_palette',
 		])
 	})
 
@@ -917,6 +922,8 @@ Interface.definePanels(() => {
 	Toolbars.color_picker.toPlace();
 
 	ColorPanel.palette = ColorPanel.palette_panel.vue._data.palette;
+	// Apply the active project's palette now that the panel exists (event timing safety net)
+	if (typeof Project !== 'undefined' && Project) loadProjectPalette(Project);
 });
 
 // MARK: Actions
@@ -1134,6 +1141,56 @@ BARS.defineActions(function() {
 		}
 	})
 
+	// MARK: cross-project palette clipboard
+	Clipbench.setPalette = function() {
+		if (!ColorPanel.palette || !ColorPanel.palette.length) return;
+		let colors = ColorPanel.palette.slice();
+		Clipbench.palette = colors;
+		// Route through the OS clipboard so the palette can be pasted into another project/window
+		Clipbench.writeSystemJSON({type: 'palette', content: colors});
+	}
+	Clipbench.pastePalette = async function() {
+		let colors = Clipbench.palette;
+		let data = Clipbench.readSystemJSON();
+		if (data && data.type === 'palette' && data.content instanceof Array) {
+			colors = data.content;
+		}
+		if (!colors || !colors.length) return;
+		if (StateMemory.color_palette_locked) {
+			Blockbench.showQuickMessage('message.palette_locked');
+			return;
+		}
+		// Replacing a non-empty palette requires confirmation, mirroring load_palette
+		if (ColorPanel.palette.length) {
+			let result = await new Promise((resolve) => {
+				Blockbench.showMessageBox({
+					translateKey: 'load_palette',
+					buttons: ['dialog.confirm', 'dialog.cancel']
+				}, resolve);
+			})
+			if (result != 0) return;
+		}
+		ColorPanel.palette.splice(0, Infinity, ...colors);
+		ColorPanel.saveLocalStorages();
+	}
+	new Action('copy_palette', {
+		icon: 'fa-copy',
+		category: 'color',
+		condition: () => Prop.active_panel == 'palette' && ColorPanel.palette.length > 0,
+		click() {
+			Clipbench.setPalette();
+			Blockbench.showQuickMessage('message.copied_palette');
+		}
+	})
+	new Action('paste_palette', {
+		icon: 'fa-paste',
+		category: 'color',
+		condition: () => Prop.active_panel == 'palette',
+		click() {
+			Clipbench.pastePalette();
+		}
+	})
+
 
 	new NumSlider('slider_color_h', {
 		condition: () => Modes.paint && !StateMemory.color_picker_rgb,
@@ -1284,6 +1341,27 @@ BARS.defineActions(function() {
 			}
 		}
 	})
+})
+
+// MARK: project-scoped palette
+// The color palette is per-project: snapshot it into the outgoing project and restore the incoming one,
+// so copy/paste and local presets are the only ways to move colors between projects.
+function loadProjectPalette(project) {
+	if (!project || !ColorPanel.palette) return;
+	if (!(project.palette instanceof Array)) {
+		project.palette = palettes.default.slice();
+	}
+	ColorPanel.palette.splice(0, Infinity, ...project.palette);
+}
+function storeProjectPalette(project) {
+	if (!project || !ColorPanel.palette) return;
+	project.palette = ColorPanel.palette.slice();
+}
+Blockbench.on('select_project', ({project}) => {
+	loadProjectPalette(project || Project);
+})
+Blockbench.on('unselect_project', ({project}) => {
+	storeProjectPalette(project || Project);
 })
 
 Object.assign(window, {

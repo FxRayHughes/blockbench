@@ -14,11 +14,31 @@ export const Clipbench = {
 		outliner: 'outliner',
 		texture_selection: 'texture_selection',
 		image: 'image',
+		palette: 'palette',
 	},
 	type_icons: {
 		face: 'aspect_ratio',
 		mesh_selection: 'fa-gem',
 		outliner: 'fas.fa-cube',
+	},
+	readSystemJSON() {
+		// Read a structured payload written by another project/window via the OS clipboard (cross-project clipboard)
+		if (!isApp) return null;
+		try {
+			let data = JSON.parse(clipboard.readHTML());
+			return (data && typeof data == 'object') ? data : null;
+		} catch (err) {
+			return null;
+		}
+	},
+	hasSystemOutlinerData() {
+		// Whether the OS clipboard holds outliner elements/groups copied from another project/window
+		let data = Clipbench.readSystemJSON();
+		return !!(data && data.content && ['elements', 'groups', 'group'].includes(data.type));
+	},
+	writeSystemJSON(obj) {
+		// Write a structured payload to the OS clipboard so other projects/windows can read it
+		if (isApp) clipboard.writeHTML(JSON.stringify(obj));
 	},
 	getCopyType(mode, check) {
 		// mode: 1 = copy, 2 = paste
@@ -54,6 +74,9 @@ export const Clipbench = {
 		if (p == 'textures' && (Texture.selected || mode === 2)) {
 			return Clipbench.types.texture;
 		}
+		if (p == 'palette' && (ColorPanel.palette?.length || mode === 2)) {
+			return Clipbench.types.palette;
+		}
 		if (p == 'layers' && Texture.selected && Texture.selected.selected_layer) {
 			return Clipbench.types.layer;
 		}
@@ -86,7 +109,7 @@ export const Clipbench = {
 		}
 		if (Modes.edit && p == 'preview') {
 			let options = [];
-			if (Clipbench.elements.length || Clipbench.groups) {
+			if (Clipbench.elements.length || Clipbench.groups || Clipbench.hasSystemOutlinerData()) {
 				options.push(Clipbench.types.outliner);
 			}
 			if (Mesh.selected[0] && Mesh.selected[0].getSelectedVertices().length && Clipbench.vertices) {
@@ -120,6 +143,9 @@ export const Clipbench = {
 		if (p == 'textures') {
 			return Clipbench.types.texture;
 		}
+		if (p == 'palette') {
+			return Clipbench.types.palette;
+		}
 		if (p == 'layers' && Texture.selected && Texture.selected.selected_layer) {
 			return Clipbench.types.layer;
 		}
@@ -137,6 +163,9 @@ export const Clipbench = {
 		let copy_type = Clipbench.getCopyType(1);
 		Clipbench.last_copied = copy_type;
 		switch (copy_type) {
+			case 'palette':
+				Clipbench.setPalette();
+				break;
 			case 'text':
 				Clipbench.setText(window.getSelection()+'');
 				break;
@@ -193,6 +222,9 @@ export const Clipbench = {
 		if (match) return;
 
 		switch (await Clipbench.getPasteType()) {
+			case 'palette':
+				Clipbench.pastePalette();
+				break;
 			case 'text':
 				let text = isApp ? clipboard.readText() : await navigator.clipboard.readText();
 				Blockbench.dispatchEvent('paste_text', {text});
@@ -310,7 +342,7 @@ export const Clipbench = {
 		Canvas.updateView({elements: Mesh.selected, selection: true})
 	},
 	pasteOutliner(event) {
-		let new_groups = [];
+		let new_groups = [], elements = [];
 		Undo.initEdit({outliner: true, elements: [], groups: new_groups, selection: true});
 		//Group
 		var target = 'root';
@@ -328,7 +360,7 @@ export const Clipbench = {
 				if (data.type === 'elements' && data.content) {
 					Clipbench.groups = undefined;
 					Clipbench.elements = data.content;
-				} else if (data.type === 'group' && data.content) {
+				} else if ((data.type === 'groups' || data.type === 'group') && data.content) {
 					Clipbench.groups = data.content;
 					Clipbench.elements = [];
 				}
@@ -363,7 +395,7 @@ export const Clipbench = {
 			}
 
 		} else if (Clipbench.elements && Clipbench.elements.length) {
-			let elements = [];
+			elements = [];
 			let new_elements_by_old_id = {};
 			for (let save of Clipbench.elements) {
 				if (!OutlinerElement.isTypePermitted(save.type)) continue;

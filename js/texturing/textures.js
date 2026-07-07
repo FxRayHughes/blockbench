@@ -2402,7 +2402,11 @@ Clipbench.setTexture = function(texture) {
 		} else {
 			var img = nativeImage.createFromPath(texture.source.split('?')[0]);
 		}
-		clipboard.writeImage(img);
+		// Write both the raw image and structured metadata so textures paste with full fidelity across projects/windows
+		clipboard.write({
+			image: img,
+			html: JSON.stringify({type: 'texture', content: Clipbench.texture})
+		});
 	}
 }
 Clipbench.pasteTextures = function() {
@@ -2423,6 +2427,15 @@ Clipbench.pasteTextures = function() {
 		Clipbench.texture = null;
 
 	} else if (isApp) {
+		// Prefer structured metadata copied from another project/window (keeps name/uv/frame); fall back to the raw image
+		let meta = Clipbench.readSystemJSON();
+		if (meta && meta.type === 'texture' && meta.content && meta.content.source) {
+			let texture = new Texture(meta.content).convertToInternal(meta.content.source).fillParticle().load().add(true);
+			setTimeout(function() {
+				texture.propertiesDialog();
+			}, 40)
+			return;
+		}
 		var image = clipboard.readImage().toDataURL('image/png', 1);
 		loadFromDataUrl(image);
 	} else {

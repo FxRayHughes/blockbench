@@ -13,7 +13,9 @@ declare global {
             outliner = 'outliner',
             texture_selection = 'texture_selection',
             image = 'image',
+            palette = 'palette',
         }
+        let palette: string[];
         let image: undefined | {
             x: number,
             y: number,
@@ -25,6 +27,11 @@ declare global {
             let mesh_selection = 'fa-gem';
             let outliner = 'fas.fa-cube';
         }
+        function readSystemJSON(): any;
+        function hasSystemOutlinerData(): boolean;
+        function writeSystemJSON(obj: any): void;
+        function setPalette(): void;
+        function pastePalette(): Promise<void>;
         function getCopyType(mode: any, check: any): Clipbench.types;
         function getPasteType(): Promise<Clipbench.types>;
         function copy(event: Event, cut: any): void;
